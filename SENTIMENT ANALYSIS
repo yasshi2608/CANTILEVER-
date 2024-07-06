@@ -1,0 +1,86 @@
+import spacy
+import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import VotingClassifier
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import accuracy_score, classification_report
+import joblib
+import nltk
+from nltk.corpus import movie_reviews
+from nltk.tokenize import word_tokenize
+
+# Load spaCy model
+nlp = spacy.load('en_core_web_sm')
+
+#  text data
+def preprocess_text(text):
+    doc = nlp(text)
+    return ' '.join(token.lemma_ for token in doc if not token.is_stop and not token.is_punct)
+
+# Download NLTK resources (if not already downloaded)
+nltk.download('movie_reviews')
+nltk.download('punkt')
+
+# Load dataset
+documents = [(movie_reviews.raw(fileid), category)
+             for category in movie_reviews.categories()
+             for fileid in movie_reviews.fileids(category)]
+
+# Convert DataFrame
+data = pd.DataFrame(documents, columns=['review', 'sentiment'])
+
+# Apply tokenization and preprocessing
+data['review'] = data['review'].apply(word_tokenize)
+data['review'] = data['review'].apply(lambda x: ' '.join(x))
+data['review'] = data['review'].apply(preprocess_text)
+
+# Split data
+X_train, X_test, y_train, y_test = train_test_split(data['review'], data['sentiment'], test_size=0.3, random_state=42)
+
+# Create a TF-IDF vectorizer and pipeline
+tfidf_vectorizer = TfidfVectorizer(max_features=5000)
+voting_classifier = VotingClassifier(estimators=[
+    ('nb', MultinomialNB()),
+    ('lr', LogisticRegression(max_iter=1000)),
+    ('svc', SVC(kernel='linear', probability=True))
+], voting='soft')
+
+pipeline = Pipeline([
+    ('tfidf', tfidf_vectorizer),
+    ('clf', voting_classifier)
+])
+
+# Train the model
+pipeline.fit(X_train, y_train)
+
+# Save the model
+joblib.dump(pipeline, 'sentiment_model.pkl')
+
+# Make predictions
+y_pred = pipeline.predict(X_test)
+
+# Evaluate the model
+accuracy = accuracy_score(y_test, y_pred)
+print(f'Accuracy: {accuracy:.2f}')
+print(classification_report(y_test, y_pred))
+
+# Example inputs for testing
+inputs = [
+    "This movie was amazing! The acting was superb and the storyline was engaging.",
+    "I regret watching this film. The acting was terrible and the plot was boring."
+]
+
+# Process and predict sentiments for inputs
+print("\nExample Predictions:")
+for input_text in inputs:
+    input_text_processed = preprocess_text(input_text)
+    input_vectorized = tfidf_vectorizer.transform([input_text_processed])
+    prediction = pipeline.predict(input_vectorized)[0]
+    
+    print(f"Input Text: {input_text}")
+    print(f"Predicted Sentiment: {'Positive' if prediction == 'pos' else 'Negative'}")
+    print()
